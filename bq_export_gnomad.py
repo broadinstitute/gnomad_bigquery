@@ -122,7 +122,6 @@ def export_variants(data_type: str, export_subsets_freq: bool, export_all_sex_fr
 
     rf = hl.read_table(annotations_ht_path(data_type, 'rf'))
     rf_expr = {f: rf[ht.key][f] for f in rf.row_value if not f.endswith('rank')}
-    rf_expr['rf_probability'] = rf[ht.key]['rf_probability']['TP']
     ht = ht.annotate(**rf_expr)
 
     lcr_intervals = hl.import_locus_intervals(lcr_intervals_path)
