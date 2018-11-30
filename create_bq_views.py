@@ -2,6 +2,14 @@ import argparse
 from bq_utils import *
 from bq_table_descriptions import *
 
+POPMAX_SQL = """
+            (select struct(element.pop, element.ac, element.an, element.af, element.hom) from
+            unnest(freq.list) as x
+            where x.element.pop in ('nfe', 'eas', 'amr', 'afr', 'sas')
+            and x.element.sex = 'all'
+            and x.element.af  > 0
+            order by element.af desc limit 1) as popmax
+            """
 
 def get_data_view(client: bigquery.Client, data_type: str, dataset: bigquery.DatasetReference) -> str:
     """
@@ -30,12 +38,7 @@ def get_data_view(client: bigquery.Client, data_type: str, dataset: bigquery.Dat
            {",".join([f for f in genotypes_cols if f != 'v'])}, 
            {",".join([f for f in variants_cols if f not in first_cols])},
            {",".join([f for f in meta_cols if f not in genotypes_cols])},
-            (select struct(element.pop, element.ac, element.af, element.hom) from
-             unnest(freq.list) as x
-            where x.element.pop in ('nfe', 'eas', 'amr', 'afr', 'sas')
-            and x.element.sex = 'all'
-            and x.element.af  > 0
-            order by element.af desc limit 1) as popmax
+            {POPMAX_SQL}
             
            FROM `{dataset.project}.{dataset.dataset_id}.{data_type}_variants` as v
     LEFT JOIN (
@@ -93,6 +96,18 @@ def main(args):
     create_table(client,
                  dataset.table('all'),
                  sql=create_union_query(client, [dataset.table('exomes'), dataset.table('genomes')]),
+                 view=True,
+                 overwrite=args.overwrite,
+                 description=get_data_view_desc()
+                 )
+
+    logger.info("Creating all variants view")
+    all_variants_sql = create_union_query(client, [dataset.table('exomes_variants'), dataset.table('genomes_variants')])
+    all_variants_sql = all_variants_sql.replace('FROM', f', {POPMAX_SQL}, "exomes" as data_type from', 1)
+    all_variants_sql = all_variants_sql.replace('FROM', f', {POPMAX_SQL}, "genomes" as data_type from', 1)
+    create_table(client,
+                 dataset.table('all_variants'),
+                 sql=all_variants_sql,
                  view=True,
                  overwrite=args.overwrite,
                  description=get_data_view_desc()
