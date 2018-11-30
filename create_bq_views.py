@@ -4,6 +4,16 @@ from bq_table_descriptions import *
 
 
 def get_data_view(client: bigquery.Client, data_type: str, dataset: bigquery.DatasetReference) -> str:
+    """
+    This creates a view over one of the 'exomes' or 'genomes' data regrouping the
+    variants, genotypes and sample metadat into a single view.
+
+    :param CLient client: BQ client
+    :param str data_type: One of 'exomes' or 'genomes'
+    :param DatasetReference dataset: BQ Dataset
+    :return: SQL for the view
+    :rtype: str
+    """
 
     #Exclude data_type from meta, so we can use * in main  query
     meta_table = client.get_table(dataset.table(f'{data_type}_meta'))
@@ -19,7 +29,13 @@ def get_data_view(client: bigquery.Client, data_type: str, dataset: bigquery.Dat
     SELECT {",".join(first_cols)},
            {",".join([f for f in genotypes_cols if f != 'v'])}, 
            {",".join([f for f in variants_cols if f not in first_cols])},
-           {",".join([f for f in meta_cols if f not in genotypes_cols])} 
+           {",".join([f for f in meta_cols if f not in genotypes_cols])},
+            (select struct(element.pop, element.ac, element.af, element.hom) from
+             unnest(freq.list) as x
+            where x.element.pop in ('nfe', 'eas', 'amr', 'afr', 'sas')
+            and x.element.sex = 'all'
+            and x.element.af  > 0
+            order by element.af desc limit 1) as popmax
             
            FROM `{dataset.project}.{dataset.dataset_id}.{data_type}_variants` as v
     LEFT JOIN (
