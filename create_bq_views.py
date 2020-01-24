@@ -41,17 +41,8 @@ def get_data_view(client: bigquery.Client, data_type: str, dataset: bigquery.Dat
             {POPMAX_SQL}
             
            FROM `{dataset.project}.{dataset.dataset_id}.{data_type}_variants` as v
-    LEFT JOIN (
-        SELECT {",".join([f"gt.{f}" for f in genotypes_cols])}, 
-               {",".join([f"meta.{f}" for f in meta_cols if f not in genotypes_cols])} 
-        FROM `{dataset.project}.{dataset.dataset_id}.{data_type}_genotypes` as gt
-        JOIN (
-            SELECT {",".join([f for f in meta_cols])} FROM `{dataset.project}.{dataset.dataset_id}.{data_type}_meta`
-             ) as meta
-        ON gt.s = meta.s
-        ) as g
-    ON v.idx = g.v
-    
+    LEFT JOIN `{dataset.project}.{dataset.dataset_id}.{data_type}_genotypes` as gt ON v.idx = gt.v
+    LEFT JOIN `{dataset.project}.{dataset.dataset_id}.{data_type}_meta` as meta ON gt.s = meta.s    
     """
 
 
