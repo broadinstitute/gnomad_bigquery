@@ -23,26 +23,26 @@ def get_data_view(client: bigquery.Client, data_type: str, dataset: bigquery.Dat
     :rtype: str
     """
 
-    #Exclude data_type from meta, so we can use * in main  query
+    # Exclude data_type from meta, so we can use * in main  query
     meta_table = client.get_table(dataset.table(f'{data_type}_meta'))
     variants_table = client.get_table(dataset.table(f'{data_type}_variants'))
     genotypes_table = client.get_table(dataset.table(f'{data_type}_genotypes'))
-    meta_cols = [f'meta_{f.name}' for f in meta_table.schema if f.name != 'data_type']
-    genotypes_cols = [f'gt_{f.name}' for f in genotypes_table.schema]
-    variants_cols = [f'v_{f.name}' for f in variants_table.schema]
+    meta_cols = [f.name for f in meta_table.schema if f.name != 'data_type']
+    genotypes_cols = [f.name for f in genotypes_table.schema]
+    variants_cols = [f.name for f in variants_table.schema]
     first_cols = [f"'{data_type}' as data_type", "chrom", "pos", "ref", "alt"]
 
     return f"""
-    
+
     SELECT {",".join(first_cols)},
-           {",".join([f for f in genotypes_cols if f != 'gt_v'])}, 
-           {",".join([f for f in variants_cols if f not in first_cols])},
-           {",".join([f for f in meta_cols if f not in genotypes_cols])},
+           {",".join([f'gt.{f}' for f in genotypes_cols if f != 'v'])}, 
+           {",".join([f'v.{f}' for f in variants_cols if f not in first_cols])},
+           {",".join([f'meta.{f}' for f in meta_cols if f not in genotypes_cols])},
             {POPMAX_SQL}
             
            FROM `{dataset.project}.{dataset.dataset_id}.{data_type}_variants` as v
-    LEFT JOIN `{dataset.project}.{dataset.dataset_id}.{data_type}_genotypes` as gt ON v.v_idx = gt.gt_v
-    LEFT JOIN `{dataset.project}.{dataset.dataset_id}.{data_type}_meta` as meta ON gt.gt_s = meta.meta_s    
+    LEFT JOIN `{dataset.project}.{dataset.dataset_id}.{data_type}_genotypes` as gt ON v.idx = gt.v
+    LEFT JOIN `{dataset.project}.{dataset.dataset_id}.{data_type}_meta` as meta ON gt.s = meta.s    
     """
 
 
