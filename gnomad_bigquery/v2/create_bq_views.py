@@ -1,6 +1,6 @@
 import argparse
-from bq_utils import *
-from bq_table_descriptions import *
+from gnomad_bigquery.v2.bq_utils import *
+from gnomad_bigquery.v2.bq_table_descriptions import *
 
 POPMAX_SQL = """
             (select struct(element.pop, element.ac, element.an, element.af, element.hom) from
@@ -56,10 +56,10 @@ def main(args):
     create_table(client,
                  dataset.table('all_meta'),
                  sql=create_union_query(client,
-                                                  [client.get_table(dataset.table('genomes_meta')),
-                                                   client.get_table(dataset.table('exomes_meta'))],
-                                                  True
-                                                  ),
+                                        [client.get_table(dataset.table('genomes_meta')),
+                                         client.get_table(dataset.table('exomes_meta'))],
+                                        True
+                                        ),
                  view=True,
                  overwrite=args.overwrite,
                  description=get_meta_table_desc()

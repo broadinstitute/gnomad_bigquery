@@ -1,8 +1,8 @@
 import argparse
-import bq_import
-from bq_table_descriptions import *
-from bq_utils import logger
 import sys
+from gnomad_bigquery.v2 import bq_import
+from gnomad_bigquery.v2.bq_table_descriptions import get_variants_table_desc, get_meta_table_desc, get_genotypes_table_desc
+from gnomad_bigquery.v2.bq_utils import logger
 
 
 def main(args):

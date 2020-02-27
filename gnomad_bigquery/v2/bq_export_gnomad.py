@@ -1,6 +1,13 @@
+import argparse
 import sys
-from gnomad_hail import *
-from bq_utils import *
+from typing import Optional
+import hail as hl
+
+from gnomad_qc.v2.resources import get_gnomad_data, get_gnomad_meta, annotations_ht_path
+from gnomad_bigquery.v2.bq_utils import logger, export_ht_for_bq
+from gnomad_hail.utils.constants import CSQ_ORDER
+from gnomad_hail.utils.slack import try_slack
+from gnomad_hail.resources.grch37.reference_data import lcr_intervals, seg_dup_intervals, decoy_intervals
 
 
 def export_genotypes(data_type: str, export_missing_genotypes: bool, output_dir: str, max_freq: Optional[float] = None, least_consequence: str = None, variant_index: bool = True) -> None:
@@ -125,12 +132,12 @@ def export_variants(data_type: str, export_subsets_freq: bool, export_all_sex_fr
     rf_expr = {f: rf[ht.key][f] for f in rf.row_value if not f.endswith('rank')}
     ht = ht.annotate(**rf_expr)
 
-    lcr_intervals = hl.import_locus_intervals(lcr_intervals_path)
-    decoy_intervals = hl.import_locus_intervals(decoy_intervals_path)
-    segdup_intervals = hl.import_locus_intervals(segdup_intervals_path)
-    ht = ht.annotate(lcr=hl.is_defined(lcr_intervals[ht.locus]))  # TODO: combine annotations if Hail bug is fixed
-    ht = ht.annotate(decoy=hl.is_defined(decoy_intervals[ht.locus]))
-    ht = ht.annotate(segdup=hl.is_defined(segdup_intervals[ht.locus]))
+    lcr = lcr_intervals.ht()
+    decoy = decoy_intervals.ht()
+    segdup = seg_dup_intervals.ht()
+    ht = ht.annotate(lcr=hl.is_defined(lcr[ht.locus]))  # TODO: combine annotations if Hail bug is fixed
+    ht = ht.annotate(decoy=hl.is_defined(decoy[ht.locus]))
+    ht = ht.annotate(segdup=hl.is_defined(segdup[ht.locus]))
     ht = ht.annotate(nonpar=(ht.locus.in_x_nonpar() | ht.locus.in_y_nonpar()))
 
     export_ht_for_bq(ht, f'{output_dir}/gnomad_{data_type}_variants.parquet')
