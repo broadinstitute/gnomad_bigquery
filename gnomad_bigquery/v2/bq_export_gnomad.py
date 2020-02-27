@@ -1,3 +1,4 @@
+import sys
 from gnomad_hail import *
 from bq_utils import *
 
@@ -28,7 +29,7 @@ def export_genotypes(data_type: str, export_missing_genotypes: bool, output_dir:
         freq = freq.filter(freq.freq[0].AF < max_freq)
         freq = freq.persist()
         logger.info(f"Found {freq.count()} variants with AF < {max_freq}")
-        select_expr = select_expr & hl.is_defined(vep[mt.row_key])
+        select_expr = select_expr & hl.is_defined(freq[mt.row_key])
 
     mt = mt.filter_rows(select_expr)
     ht = mt.entries()
@@ -93,8 +94,8 @@ def export_variants(data_type: str, export_subsets_freq: bool, export_all_sex_fr
             return freq_struct
 
         return  ht.annotate(freq=hl.zip(freq_meta, freq[ht.key].freq)
-                     .filter(filter_freqs)
-                     .map(get_freq_struct))
+                            .filter(filter_freqs)
+                            .map(get_freq_struct))
 
     ht = get_gnomad_data(data_type, non_refs_only=True).rows()
     ht = ht.select().add_index()  # TODO: Add interesting annotations
@@ -205,7 +206,3 @@ if __name__ == '__main__':
         try_slack(args.slack_channel, main, args)
     else:
         main(args)
-
-
-
-
