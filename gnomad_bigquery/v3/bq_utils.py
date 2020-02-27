@@ -4,6 +4,9 @@ import hail as hl
 import logging
 import sys
 
+from gnomad_qc.v3.resources import get_gnomad_v3_mt, meta
+from gnomad_hail.utils.gnomad_functions import get_adj_expr, adjusted_sex_ploidy_expr
+
 logging.basicConfig(format="%(levelname)s (%(name)s %(lineno)s): %(message)s")
 logger = logging.getLogger("bq")
 logger.setLevel(logging.INFO)
@@ -133,3 +136,23 @@ def export_ht_for_bq(ht: hl.Table, destination: str, lower: bool = True, mode: s
 
     ht.to_spark().write.parquet(destination, mode=mode)
     logger.info(f"Successfully exported {destination}")
+
+
+def get_gnomad_v3_data_for_bq(key_by_locus_and_alleles=True, remove_hard_filtered_samples=False, adjust_sex_and_annotate_adj=False) -> hl.MatrixTable:
+    """
+    This script preps gnomAD v3 data for bigquery export. Specifically splitting a sparse MT,
+    removing all non_ref entries, and filtering out monomorphic sites.
+    :return:
+    """
+    mt = get_gnomad_v3_mt(key_by_locus_and_alleles=key_by_locus_and_alleles, remove_hard_filtered_samples=remove_hard_filtered_samples)
+    mt = hl.experimental.sparse_split_multi(mt, filter_changed_loci=True)
+    mt = mt.filter_entries(mt.GT.is_non_ref())
+    mt = mt.filter_rows(hl.agg.any(mt.GT.is_non_ref()))  # TODO: Is this needed without columns filtered?
+    mt = mt.filter_rows(hl.len(mt.alleles) > 1)
+    if adjust_sex_and_annotate_adj:
+        mt = mt.annotate_cols(**meta.ht()[mt.col_key])
+        mt = mt.annotate_entries(
+            GT=adjusted_sex_ploidy_expr(mt.locus, mt.GT, mt.meta.sex),
+            adj=get_adj_expr(mt.GT, mt.GQ, mt.DP, mt.AD)
+        )
+    return mt
