@@ -10,17 +10,17 @@ from gnomad_hail.resources.grch38.reference_data import lcr_intervals
 from gnomad_qc.v3.resources.meta import meta
 from gnomad_qc.v3.resources import annotations
 
+
 def export_genotypes(
-        data_type: str,
         export_missing_genotypes: bool,
         output_dir: str,
         least_consequence: str = None,
         variant_index: bool = True,
+
 ) -> None:
     """
     Export gnomAD genotypes, present or missing, within variants where
     there is a transcript consequence that is at least the least_consequence passed
-    :param data_type: exomes or genomes (used to write out a path)
     :param export_missing_genotypes: whether to export only missing GTs
     :param output_dir: Directory where to write parquet file
     :param least_consequence: Least consequence admitted, default is `3_prime_UTR_variant`
@@ -37,7 +37,7 @@ def export_genotypes(
     vep = annotations.vep.ht()
     if least_consequence is not None:
         vep_consequences = hl.literal(
-            set(CSQ_ORDER[0 : CSQ_ORDER.index(least_consequence) + 1])
+            set(CSQ_ORDER[0: CSQ_ORDER.index(least_consequence) + 1])
         )
         vep = vep.filter(
             vep.vep.transcript_consequences.any(
@@ -89,29 +89,27 @@ def export_genotypes(
             "pl1": ht.PL[1],
             "pl2": ht.PL[2],
             "pid": ht.PID,
-            "pgt": ht.PGT,
+            "pgt1_non_ref": ht.PGT[0] != 0,
+            "pgt2_non_ref": ht.PGT[1] != 0,
         }
     )
     ht = ht.select(**select_expr)
-
     ht.to_spark().write.parquet(
-        "{}/gnomad_{}{}_genotypes.parquet".format(
-            output_dir, data_type, "missing_" if export_missing_genotypes else ""
+        "{}{}_genotypes.parquet".format(
+            output_dir, "_missing" if export_missing_genotypes else ""
         ),
         mode="overwrite",
     )
 
 
 def export_variants(
-        data_type: str,
         export_subsets_freq: bool,
         export_all_sex_freq: bool,
-        output_dir: str,
+        output_path: str,
         add_vep: bool
 ) -> None:
     """
     Exports all variants in gnomAD with their frequencies and optional vep transcript consequences
-    :param data_type: exomes or genomes (used to write out a path)
     :param export_subsets_freq: Whether to export subset frequencies alongside overall frequencies
     :param export_all_sex_freq: Whether to export sex frequencies alongside overall frequencies
     :param output_dir: Directory where to write parquet file
@@ -172,7 +170,7 @@ def export_variants(
     ht = ht.annotate(lcr=hl.is_defined(lcr_intervals.ht()[ht.locus]))
     ht = ht.annotate(nonpar=(ht.locus.in_x_nonpar() | ht.locus.in_y_nonpar()))
 
-    export_ht_for_bq(ht, f"{output_dir}/gnomad_{data_type}_variants.parquet")
+    export_ht_for_bq(ht, f"{output_path}_variants.parquet")
 
 
 def main(args):
@@ -186,36 +184,35 @@ def main(args):
 
     for data_type in data_types:
 
+        output_path = f"{args.output_dir}/gnomad_{data_type}_v{args.version}"
+
         if args.export_metadata:
             metadata = meta.ht()
             export_ht_for_bq(
-                metadata, f"{args.output_dir}/gnomad_{data_type}_meta.parquet"
+                metadata, f"{output_path}_meta.parquet"
             )
 
         if args.export_genotypes:
             export_genotypes(
-                data_type,
                 False,
-                args.output_dir,
+                output_path,
                 args.least_consequence,
                 True,
             )
 
         if args.export_missing_genotypes:
             export_genotypes(
-                data_type,
                 True,
-                args.output_dir,
+                output_path,
                 args.least_consequence,
                 True,
             )
 
         if args.export_variants:
             export_variants(
-                data_type,
                 args.export_subset_freq,
                 args.export_all_sex_freq,
-                args.output_dir,
+                output_path,
                 True,
             )
 
@@ -235,6 +232,11 @@ if __name__ == "__main__":
         "--genomes",
         help="Run on genomes. At least one of --exomes or --genomes is required.",
         action="store_true",
+    )
+    parser.add_argument(
+        "--version",
+        help="gnomAD version",
+        type=int,
     )
     parser.add_argument(
         "--export_metadata", help="Export samples metadata", action="store_true"
@@ -285,9 +287,9 @@ if __name__ == "__main__":
         sys.exit("Error: At least one of --exomes or --genomes must be specified.")
 
     if (
-        not args.export_genotypes
-        and not args.export_variants
-        and not args.export_metadata
+            not args.export_genotypes
+            and not args.export_variants
+            and not args.export_metadata
     ):
         sys.exit(
             "Error: At least one of --export_metadata, --export_variants or --export_genotypes must be specified"
