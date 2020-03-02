@@ -1,27 +1,29 @@
 from gnomad_hail import CSQ_ORDER
 
 LEAST_CSQ = '3_prime_UTR_variant'
-MAX_AF = 0.02
 
-def get_variants_table_desc(data_type: str = None):
+
+def get_variants_table_desc(data_type: str = None, version: int=None):
     dtype = '' if data_type is None else f' {data_type}'
-    return f"""This table contains all gnomad{dtype} variants.
+    version = '' if version is None else f' v{version}'
+    return f"""This table contains all gnomad{dtype}{version} variants.
     Notes:
     * All variants were split, so multi-allelic sites are represented as multiple rows (one per non-ref allele)
     * Only VEP transcript annotations are available (non-coding annotations aren't)
     """
 
-def get_meta_table_desc(data_type: str = None):
+
+def get_meta_table_desc(data_type: str = None, version: int=None):
     dtype = '' if data_type is None else f' {data_type}'
-    return f"""This table contains all gnomad{dtype} samples metadata.
+    return f"""This table contains all gnomad{dtype}{version} samples metadata.
     """
 
-def get_genotypes_table_desc(data_type: str  = None):
+
+def get_genotypes_table_desc(data_type: str = None, version: int=None):
     dtype = '' if data_type is None else f' {data_type}'
     all_str = 'all' if data_type is None else data_type
-    return f"""This table contains all gnomad{dtype} non-reference genotypes for variants meeting the following criteria:
-    1. Global variant allele frequency <= {int(100*MAX_AF)}%
-    2. Variant VEP annotation is at least `{LEAST_CSQ}` (i.e. one of: {','.join(CSQ_ORDER[0:CSQ_ORDER.index(LEAST_CSQ) + 1])})
+    return f"""This table contains all gnomad{dtype}{version} non-reference genotypes for variants meeting the following criteria:
+    1. Variant VEP annotation is at least `{LEAST_CSQ}` (i.e. one of: {','.join(CSQ_ORDER[0:CSQ_ORDER.index(LEAST_CSQ) + 1])})
     
     A few notes about data representation:
     * All variants were split beforehand, so all genotypes are bi-allelic.
