@@ -1,5 +1,8 @@
 import argparse
+
 from google.cloud import bigquery
+
+from gnomad_bigquery.v3.bq_utils import logger
 
 def get_parser():
     parser = argparse.ArgumentParser()
@@ -12,7 +15,7 @@ def get_parser():
 
 def main(args):
 
-    client = bigquery.Client()
+    client = bigquery.client.Client()
 
     dataset_ref = client.dataset(args.dataset)
     table_ref = dataset_ref.table(args.table)
@@ -25,7 +28,7 @@ def main(args):
                                           job_config=job_config)
 
     load_job.result()
-    print('Successfully loaded {} rows in table {}.{}.'.format(client.get_table(table_ref).num_rows, args.dataset, args.table))
+    logger.info('Successfully loaded {} rows in table {}.{}.'.format(client.get_table(table_ref).num_rows, args.dataset, args.table))
 
     if args.description is not None:
         table = bigquery.Table(table_ref)
