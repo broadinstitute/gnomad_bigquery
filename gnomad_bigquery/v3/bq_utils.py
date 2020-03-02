@@ -149,8 +149,7 @@ def get_gnomad_data_for_bq(key_by_locus_and_alleles=True, remove_hard_filtered_s
     :param adjust_sex_and_annotate_adj: Adjusts sex ploidy and annotates GT with adj
     :return: MatrixTable
     """
-    # mt = get_gnomad_v3_mt(key_by_locus_and_alleles=key_by_locus_and_alleles, remove_hard_filtered_samples=remove_hard_filtered_samples)
-    mt = hl.read_matrix_table('gs://gnomad-lfran/gnomad_v3/gnomad_v3_head.mt').key_rows_by('locus','alleles')
+    mt = get_gnomad_v3_mt(key_by_locus_and_alleles=key_by_locus_and_alleles, remove_hard_filtered_samples=remove_hard_filtered_samples)
     mt = hl.experimental.sparse_split_multi(mt, filter_changed_loci=True)
     mt = mt.filter_entries(mt.GT.is_non_ref())
     mt = mt.filter_rows(hl.agg.any(mt.GT.is_non_ref()))

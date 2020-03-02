@@ -3,7 +3,7 @@ from gnomad_hail import CSQ_ORDER
 LEAST_CSQ = '3_prime_UTR_variant'
 
 
-def get_variants_table_desc(data_type: str = None, version: int=None):
+def get_variants_table_desc(data_type: str = None, version: int = None):
     dtype = '' if data_type is None else f' {data_type}'
     version = '' if version is None else f' v{version}'
     return f"""This table contains all gnomad{dtype}{version} variants.
@@ -13,13 +13,13 @@ def get_variants_table_desc(data_type: str = None, version: int=None):
     """
 
 
-def get_meta_table_desc(data_type: str = None, version: int=None):
+def get_meta_table_desc(data_type: str = None, version: int = None):
     dtype = '' if data_type is None else f' {data_type}'
     return f"""This table contains all gnomad{dtype}{version} samples metadata.
     """
 
 
-def get_genotypes_table_desc(data_type: str = None, version: int=None):
+def get_genotypes_table_desc(data_type: str = None, version: int = None):
     dtype = '' if data_type is None else f' {data_type}'
     all_str = 'all' if data_type is None else data_type
     return f"""This table contains all gnomad{dtype}{version} non-reference genotypes for variants meeting the following criteria:
