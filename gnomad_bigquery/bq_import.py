@@ -2,7 +2,8 @@ import argparse
 
 from google.cloud import bigquery
 
-from gnomad_bigquery.v3.bq_utils import logger
+from gnomad_bigquery.bq_utils import logger
+
 
 def get_parser():
     parser = argparse.ArgumentParser()

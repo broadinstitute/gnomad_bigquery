@@ -1,26 +1,17 @@
-from typing import List, Dict
 import logging
 import sys
+from typing import Dict, List
 
-from google.cloud import bigquery
 import hail as hl
+from gnomad.sample_qc.sex import adjusted_sex_ploidy_expr
+from gnomad.utils.annotations import get_adj_expr
+from google.cloud import bigquery
 
-from gnomad_qc.v3.resources import get_gnomad_v3_mt, meta
-from gnomad_hail.utils.gnomad_functions import get_adj_expr, adjusted_sex_ploidy_expr
-
-
-logging.basicConfig(format="%(asctime)s %(levelname)s (%(name)s %(lineno)s): %(message)s", datefmt='%m/%d/%Y %I:%M:%S %p')
+logging.basicConfig(format="%(levelname)s (%(name)s %(lineno)s): %(message)s")
 logger = logging.getLogger("bq")
 logger.setLevel(logging.INFO)
 
-TYPE_CONVERSION = {
-    ('INTEGER', 'FLOAT'): 'INTEGER',
-    ('FLOAT', 'INTEGER'): 'INTEGER',
-    ('STRING', 'INTEGER'): 'STRING',
-    ('INTEGER', 'STRING'): 'STRING',
-    ('STRING', 'FLOAT'): 'STRING',
-    ('FLOAT', 'STRING'): 'STRING'
-}
+VERSIONS = [2, 3]
 
 
 def drop_columns(client: bigquery.Client, table: bigquery.TableReference, columns_to_exclude: List[str]):
@@ -73,11 +64,20 @@ def create_table(client: bigquery.Client,
         )
         query_job.result()
         logger.info(f'{client.get_table(destination_table).num_rows} query results loaded to table {destination_table.path}')
-
         if description is not None:
             table = bigquery.Table(destination_table)
             table.description = description
             client.update_table(table, ['description'])
+
+
+TYPE_CONVERSION = {
+   ('INTEGER', 'FLOAT'): 'INTEGER',
+   ('FLOAT', 'INTEGER'): 'INTEGER',
+   ('STRING', 'INTEGER'): 'STRING',
+   ('INTEGER', 'STRING'): 'STRING',
+   ('STRING', 'FLOAT'): 'STRING',
+   ('FLOAT', 'STRING'): 'STRING'
+}
 
 
 def create_union_query(client: bigquery.Client, tables: List[bigquery.TableReference], convert_types: bool = True):
@@ -139,7 +139,7 @@ def export_ht_for_bq(ht: hl.Table, destination: str, lower: bool = True, mode: s
     logger.info(f"Successfully exported {destination}")
 
 
-def get_gnomad_data_for_bq(key_by_locus_and_alleles=True, remove_hard_filtered_samples=False, adjust_sex_and_annotate_adj=False) -> hl.MatrixTable:
+def get_gnomad_v3_data_for_bq(key_by_locus_and_alleles=True, remove_hard_filtered_samples=False, adjust_sex_and_annotate_adj=False) -> hl.MatrixTable:
     """
     This script preps gnomAD v3 data for bigquery export by splitting a sparse MT,
     removing all non_ref entries, and filtering out monomorphic sites. Optionally,
@@ -149,11 +149,14 @@ def get_gnomad_data_for_bq(key_by_locus_and_alleles=True, remove_hard_filtered_s
     :param adjust_sex_and_annotate_adj: Adjusts sex ploidy and annotates GT with adj
     :return: MatrixTable
     """
+    from gnomad_qc.v3.resources import get_gnomad_v3_mt, meta
+
     mt = get_gnomad_v3_mt(key_by_locus_and_alleles=key_by_locus_and_alleles, remove_hard_filtered_samples=remove_hard_filtered_samples)
     mt = hl.experimental.sparse_split_multi(mt, filter_changed_loci=True)
-    mt = mt.filter_entries(mt.GT.is_non_ref())
-    mt = mt.filter_rows(hl.agg.any(mt.GT.is_non_ref()))
     mt = mt.filter_rows(hl.len(mt.alleles) > 1)
+    mt = mt.filter_rows(hl.agg.any(mt.GT.is_non_ref()))
+    mt = mt.filter_entries(mt.GT.is_non_ref())
+
     if adjust_sex_and_annotate_adj:
         mt = mt.annotate_cols(**meta.ht()[mt.col_key])
         mt = mt.annotate_entries(
