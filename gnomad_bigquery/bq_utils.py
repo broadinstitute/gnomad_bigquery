@@ -11,7 +11,7 @@ logging.basicConfig(format="%(levelname)s (%(name)s %(lineno)s): %(message)s")
 logger = logging.getLogger("bq")
 logger.setLevel(logging.INFO)
 
-VERSIONS = [2, 3]
+GNOMAD_VERSIONS = [2, 3]
 
 
 def drop_columns(client: bigquery.Client, table: bigquery.TableReference, columns_to_exclude: List[str]):

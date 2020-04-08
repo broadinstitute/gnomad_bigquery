@@ -5,7 +5,7 @@ from gnomad_bigquery import bq_import
 from gnomad_bigquery.bq_table_descriptions import (get_genotypes_table_desc,
                                                    get_meta_table_desc,
                                                    get_variants_table_desc)
-from gnomad_bigquery.bq_utils import logger
+from gnomad_bigquery.bq_utils import logger, GNOMAD_VERSIONS
 
 
 def main(args):
@@ -48,7 +48,7 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--exomes', help='Will import exomes data. At least one of --exomes or --genomes is required.', action='store_true')
     parser.add_argument('--genomes', help='Will import genomes data. At least one of --exomes or --genomes is required.', action='store_true')
-    parser.add_argument('--version', help='Version of gnomAD to import.', choices=[2,3], type=int, required=True)
+    parser.add_argument('--version', help='Version of gnomAD to import.', choices=GNOMAD_VERSIONS, type=int, required=True)
     parser.add_argument('--dataset', help='Dataset to create the table in. (default: gnomad)', default='gnomad')
     parser.add_argument('--import_meta', help='Imports samples metadata.', action='store_true')
     parser.add_argument('--import_variants', help='Imports variants.', action='store_true')
@@ -59,11 +59,11 @@ if __name__ == '__main__':
 
     if not args.exomes and not args.genomes:
         sys.exit("At least one of --exomes or --genomes needs to be specified.")
-    
-    if args.exomes and args.version==3:
+
+    if args.exomes and args.version == 3:
         sys.exit('gnomAD v3 does not contain exomes')
 
     if not args.import_genotypes and not args.import_variants and not args.import_metadata:
         sys.exit('Error: At least one of --import_metadata, --import_variants or --import_genotypes must be specified')
-        
+
     main(args)

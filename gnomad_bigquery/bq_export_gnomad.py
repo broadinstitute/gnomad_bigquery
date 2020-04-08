@@ -11,7 +11,7 @@ from gnomad.resources.resource_utils import DataException
 from gnomad.utils.slack import try_slack
 from gnomad.utils.vep import CSQ_ORDER
 
-from gnomad_bigquery.bq_utils import (VERSIONS, export_ht_for_bq,
+from gnomad_bigquery.bq_utils import (GNOMAD_VERSIONS, export_ht_for_bq,
                                       get_gnomad_v3_data_for_bq, logger)
 from gnomad_qc.v2.resources.annotations import frequencies as v2_freq
 from gnomad_qc.v2.resources.annotations import rf as v2_rf
@@ -20,26 +20,24 @@ from gnomad_qc.v2.resources.basics import get_gnomad_data, get_gnomad_meta
 from gnomad_qc.v3.resources.annotations import freq as v3_freq
 from gnomad_qc.v3.resources.annotations import vep as v3_vep
 from gnomad_qc.v3.resources.meta import meta as v3_meta
+from gnomad_qc.v3.resources.variant_qc import get_filtering_model
 
 
 def export_genotypes(
     data_type: str,
     version: int,
-    export_missing_genotypes: bool,
     output_dir: str,
     max_freq: Optional[float] = None,
     least_consequence: str = None,
     variant_index: bool = True,
-    non_refs_only=True
     ) -> None:
     """
     Export gnomAD genotypes, present or missing, within variants where
     there is a transcript consequence that is at least the least_consequence passed
     :param data_type: exomes or genomes
     :param version: Version of gnomAD
-    :param export_missing_genotypes: whether to export only missing GTs
     :param output_dir: Directory where to write parquet file
-    :param max_freq: Mazimum AF to allow in export 
+    :param max_freq: Maximum AF to allow in export
     :param least_consequence: Least consequence admitted, default is `3_prime_UTR_variant`
     :param variant_index: Index variant to save on storage cost
     :return:
@@ -48,16 +46,16 @@ def export_genotypes(
         mt = get_gnomad_data(data_type, non_refs_only=True)
         vep = v2_vep(data_type).ht()
         freq = v2_freq(data_type).ht()
-    elif version == 3:
+    elif version == 3 and data_type == "genomes":
         mt = get_gnomad_v3_data_for_bq(
-            key_by_locus_and_alleles=True, 
+            key_by_locus_and_alleles=True,
             remove_hard_filtered_samples=False,
             adjust_sex_and_annotate_adj=True,
         )
         vep = v3_vep.ht()
         freq = v3_freq.ht()
     else:
-         raise DataException(f"There is no version {version} of gnomAD. Please choose one from {VERSIONS}")
+        raise DataException(f"There is no version {version} of gnomAD {data_type}. Please choose one from {GNOMAD_VERSIONS}")
 
     mt = mt.select_cols().select_rows().add_row_index()
 
@@ -65,7 +63,7 @@ def export_genotypes(
         vep_consequences = hl.literal(set(CSQ_ORDER[0:CSQ_ORDER.index(least_consequence) + 1]))
         vep = vep.filter(
             vep.vep.transcript_consequences.any(
-                lambda x: (x.biotype == "protein_coding") 
+                lambda x: (x.biotype == "protein_coding")
                 & hl.any(lambda csq: vep_consequences.contains(csq), x.consequence_terms)
             )
         )
@@ -74,28 +72,24 @@ def export_genotypes(
             vep.vep.transcript_consequences.any(lambda x: x.biotype == "protein_coding")
         )
     vep = vep.persist()
-    logger.info(
+    logger.debug(
         f"Found {vep.count()} variants with a VEP coding transcript and a consequence worst or equal to {least_consequence}."
         )
 
     select_expr = hl.is_defined(vep[mt.row_key])
 
     if max_freq is not None:
-        freq = freq.filter(freq.freq[0].AF < max_freq)	       
+        freq = freq.filter(freq.freq[0].AF < max_freq)
         freq = freq.persist()
-        logger.info(f"Found {freq.count()} variants with AF < {max_freq}")	 
+        logger.debug(f"Found {freq.count()} variants with AF < {max_freq}")
         select_expr = select_expr & hl.is_defined(vep[mt.row_key])
 
     mt = mt.filter_rows(select_expr)
     ht = mt.entries()
-    logger.info(
+    logger.debug(
         f"Found {ht.count()} variants with a VEP coding transcript and a consequence worst or equal to {least_consequence}."
         )
-    if export_missing_genotypes:
-        ht = ht.filter(ht.is_missing)
-    else:
-        ht = ht.filter(hl.is_defined(ht.GT))
-
+    ht = ht.filter(hl.is_defined(ht.GT))
     ht = ht.key_by()
     if variant_index:
         select_expr = {"v": ht.row_idx}
@@ -124,23 +118,23 @@ def export_genotypes(
         }
     )
     ht = ht.select(**select_expr)
-    ht.to_spark().write.parquet('{}/gnomad_v{}_{}{}_genotypes.parquet'.format(output_dir, version, data_type,'_missing' if export_missing_genotypes else '' ), mode='overwrite') #TODO UPDATE ALL PATHS TO MATCH THIS FORM IN EXPORT AND IMPORT
+    ht.to_spark().write.parquet('{}/gnomad_v{}_{}_genotypes.parquet'.format(output_dir, version, data_type), mode='overwrite')
 
 
-def export_variants(data_type: str, version: int, export_all_sex_freq: bool, add_rf: bool, output_dir: str, add_vep: bool) -> None:
+def export_variants(data_type: str, version: int, export_all_sex_freq: bool, export_filters: bool, output_dir: str, add_vep: bool) -> None:
     """
     Exports all variants in gnomAD with their frequencies and optional vep transcript consequences
     :param data_type: exomes or genomes
     :param version: Version of gnomAD
     :param export_all_sex_freq: Whether to export sex frequencies alongside overall frequencies
-    :param export_rf: Whether to add random forest annotations
+    :param export_filters: Whether to add random forest annotations
     :param output_dir: Directory where to write parquet file
     :param add_vep: Whether to annotate with vep's transcript_consequences and most_severe_consequence
     :return:
     """
-    def format_freq(ht: hl.Table, subset: str, version: int):
+    def format_freq(ht: hl.Table):
         def filter_freqs(x: hl.expr.ArrayExpression):
-            if version==2 and export_all_sex_freq:
+            if export_all_sex_freq:
                 return ~x[0].contains('platform') & ~x[0].contains('downsampling')
             else:
                 return ~x[0].contains('platform') & ~x[0].contains('downsampling') & ~(x[0].contains('sex') & x[0].contains('pop'))
@@ -168,23 +162,24 @@ def export_variants(data_type: str, version: int, export_all_sex_freq: bool, add
         rf = v2_rf(data_type).ht()
         lcr = lcr_intervals_37.ht()
         decoy = decoy_intervals_37.ht()
-        segdup = seg_dup_intervals_37.ht() 
-    elif version == 3:
+        segdup = seg_dup_intervals_37.ht()
+    elif version == 3 and data_type == "genomes":
         mt = get_gnomad_v3_data_for_bq(
-            key_by_locus_and_alleles=True, 
+            key_by_locus_and_alleles=True,
             remove_hard_filtered_samples=False,
             adjust_sex_and_annotate_adj=True,
         )
         vep = v3_vep.ht()
         freq = v3_freq.ht()
         lcr = lcr_intervals_38.ht()
+        vqsr = get_filtering_model("vqsr_alleleSpecificTrans", split=True).ht()
     else:
-         raise DataException(f"There is no version {version} of gnomAD. Please choose one from {VERSIONS}")
-    
+        raise DataException(f"There is no version {version} of gnomAD {data_type}. Please choose one from {GNOMAD_VERSIONS}")
+
     ht = mt.rows()
-    ht = ht.select().add_index()  # TODO: Add interesting annotations
+    ht = ht.select().add_index()
     freq_meta = hl.literal(freq.freq_meta.collect()[0])
-    ht = format_freq(ht, 'all', version)
+    ht = format_freq(ht)
 
     if add_vep:
         vep = vep.select(
@@ -195,12 +190,15 @@ def export_variants(data_type: str, version: int, export_all_sex_freq: bool, add
 
     ht = ht.annotate(nonpar=(ht.locus.in_x_nonpar() | ht.locus.in_y_nonpar()))
     ht = ht.annotate(lcr=hl.is_defined(lcr[ht.locus]))
-    
-    if version==2:
+
+    if version == 2:
         ht = ht.annotate(decoy=hl.is_defined(decoy[ht.locus]), segdup=hl.is_defined(segdup[ht.locus]))
-        if add_rf:
+        if export_filters:
             rf_expr = {f: rf[ht.key][f] for f in rf.row_value if not f.endswith('rank')}
             ht = ht.annotate(**rf_expr)
+
+    if version == 3 and export_filters:
+        ht = ht.annotate(vqsr_filters=vqsr[ht.key].filters)
 
     export_ht_for_bq(ht, f'{output_dir}/gnomad_v{version}_{data_type}_variants.parquet')
 
@@ -219,27 +217,17 @@ def main(args):
     for data_type in data_types:
 
         if args.export_metadata:
-            if version == 2 :
+            if version == 2:
                 meta = get_gnomad_meta(data_type=data_type, full_meta=True)
-            elif version == 3: 
+            elif version == 3 and data_type == "genomes":
                 meta = v3_meta.ht()
             else:
-                raise DataException(f"There is no version {version} of gnomAD. Please choose one from {VERSIONS}")
+                raise DataException(f"There is no version {version} of gnomAD {data_type}. Please choose one from {GNOMAD_VERSIONS}")
             export_ht_for_bq(meta, f'{args.output_dir}/gnomad_v{version}_{data_type}_meta.parquet')
 
         if args.export_genotypes:
             export_genotypes(data_type,
                             version,
-                            False,
-                            args.output_dir,
-                            args.max_freq,
-                            args.least_consequence,
-                            True)
-
-        if args.export_missing_genotypes:
-            export_genotypes(data_type,
-                            version,
-                            True,
                             args.output_dir,
                             args.max_freq,
                             args.least_consequence,
@@ -253,7 +241,7 @@ if __name__ == '__main__':
 
     parser = argparse.ArgumentParser()
     parser.add_argument('--slack_channel', help='Slack channel to post results and notifications to.')
-    parser.add_argument('--version', help="gnomAD version", choices=[2,3], type=int, required=True)
+    parser.add_argument('--version', help="gnomAD version", choices=GNOMAD_VERSIONS, type=int, required=True)
     parser.add_argument('--exomes', help='Run on exomes. At least one of --exomes or --genomes is required.',
                         action='store_true')
     parser.add_argument('--genomes', help='Run on genomes. At least one of --exomes or --genomes is required.',
@@ -278,7 +266,7 @@ if __name__ == '__main__':
     if not args.exomes and not args.genomes:
         sys.exit('Error: At least one of --exomes or --genomes must be specified.')
 
-    if args.exomes and args.version==3:
+    if args.exomes and args.version == 3:
         sys.exit('gnomAD v3 does not contain exomes')
 
     if not args.export_genotypes and not args.export_variants and not args.export_metadata and not args.export_transcripts:

@@ -7,7 +7,7 @@ from gnomad_bigquery.bq_table_descriptions import (get_data_view_desc,
                                                    get_genotypes_table_desc,
                                                    get_meta_table_desc,
                                                    get_variants_table_desc)
-from gnomad_bigquery.bq_utils import create_table, create_union_query, logger
+from gnomad_bigquery.bq_utils import create_table, create_union_query, logger, GNOMAD_VERSIONS
 
 POPMAX_SQL = """
             (select struct(element.pop, element.ac, element.an, element.af, element.hom) from
@@ -117,14 +117,14 @@ if __name__ == '__main__':
     parser.add_argument('--exomes', help='Will import exomes data. At least one of --exomes or --genomes is required.', action='store_true')
     parser.add_argument('--genomes', help='Will import genomes data. At least one of --exomes or --genomes is required.', action='store_true')
     parser.add_argument('--dataset', help='Dataset to create the table in. (default: gnomad)', default='gnomad')
-    parser.add_argument('--version', help="Version of gnomAD", choices=[2,3], type=int, required=True)
+    parser.add_argument('--version', help="Version of gnomAD", choices=GNOMAD_VERSIONS, type=int, required=True)
     parser.add_argument('--overwrite', help='If set, will overwrite all existing tables.', action='store_true')
     args = parser.parse_args()
 
     if not args.exomes and not args.genomes:
         sys.exit("At least one of --exomes or --genomes needs to be specified.")
 
-    if args.exomes and args.version==3:
+    if args.exomes and args.version == 3:
         sys.exit('gnomAD v3 does not contain exomes')
 
     main(args)
