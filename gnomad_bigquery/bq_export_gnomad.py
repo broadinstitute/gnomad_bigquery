@@ -20,7 +20,6 @@ from gnomad_qc.v2.resources.basics import get_gnomad_data, get_gnomad_meta
 from gnomad_qc.v3.resources.annotations import freq as v3_freq
 from gnomad_qc.v3.resources.annotations import vep as v3_vep
 from gnomad_qc.v3.resources.meta import meta as v3_meta
-from gnomad_qc.v3.resources.variant_qc import get_filtering_model
 
 
 def export_genotypes(
@@ -82,7 +81,7 @@ def export_genotypes(
         freq = freq.filter(freq.freq[0].AF < max_freq)
         freq = freq.persist()
         logger.debug(f"Found {freq.count()} variants with AF < {max_freq}")
-        select_expr = select_expr & hl.is_defined(vep[mt.row_key])
+        select_expr = select_expr & hl.is_defined(freq[mt.row_key])  #TODO: number of variants in gnomAD without vep, is there a pattern
 
     mt = mt.filter_rows(select_expr)
     ht = mt.entries()
@@ -118,7 +117,7 @@ def export_genotypes(
         }
     )
     ht = ht.select(**select_expr)
-    ht.to_spark().write.parquet('{}/gnomad_v{}_{}_genotypes.parquet'.format(output_dir, version, data_type), mode='overwrite')
+    ht.to_spark().write.parquet(f'{output_dir}/gnomad_v{version}_{data_type}_genotypes.parquet', mode='overwrite')
 
 
 def export_variants(data_type: str, version: int, export_all_sex_freq: bool, export_filters: bool, output_dir: str, add_vep: bool) -> None:
@@ -127,7 +126,7 @@ def export_variants(data_type: str, version: int, export_all_sex_freq: bool, exp
     :param data_type: exomes or genomes
     :param version: Version of gnomAD
     :param export_all_sex_freq: Whether to export sex frequencies alongside overall frequencies
-    :param export_filters: Whether to add random forest annotations
+    :param export_filters: Whether to add variant filters such as random forest annotations and vqsr 
     :param output_dir: Directory where to write parquet file
     :param add_vep: Whether to annotate with vep's transcript_consequences and most_severe_consequence
     :return:
@@ -172,7 +171,7 @@ def export_variants(data_type: str, version: int, export_all_sex_freq: bool, exp
         vep = v3_vep.ht()
         freq = v3_freq.ht()
         lcr = lcr_intervals_38.ht()
-        vqsr = get_filtering_model("vqsr_alleleSpecificTrans", split=True).ht()
+        vqsr = hl.read_table("gs://gnomad/annotations/hail-0.2/ht/genomes_v3/filtering/vqsr_alleleSpecificTrans.finalized.split.ht") #TODO: Update once variant QC is in gnomad_qc repo
     else:
         raise DataException(f"There is no version {version} of gnomAD {data_type}. Please choose one from {GNOMAD_VERSIONS}")
 
@@ -231,7 +230,7 @@ def main(args):
                             args.output_dir,
                             args.max_freq,
                             args.least_consequence,
-                            True)
+                            )
 
         if args.export_variants:
             export_variants(data_type, version, args.export_all_sex_freq, True, args.output_dir, True)
@@ -252,14 +251,12 @@ if __name__ == '__main__':
     parser.add_argument('--output_dir', help='Output root. default: gs://gnomad-tmp/bq', default='gs://gnomad-tmp/bq')
 
     var_exp = parser.add_argument_group('Export variants', description='Options related to exporting gnomAD variants')
-    var_exp.add_argument('--export_subset_freq', help='If set, exports subset frequencies', action='store_true')
     var_exp.add_argument('--export_all_sex_freq', help='If set, exports sex-specific frequencies for each pop', action='store_true')
 
     gt_exp = parser.add_argument_group('Export genotypes', description='Options related to exporting gnomAD genotypes')
     gt_exp.add_argument('--max_freq', help='If specified, maximum global adj AF for genotypes table to emit. (default: 0.02)', default=0.02, type=float)
     gt_exp.add_argument('--least_consequence', help='When exporting genotypes, includes all variants for which the worst_consequence is at least as bad as the specified consequence. The order is taken from gnomad_hail.constants. (default: 3_prime_UTR_variant)',
                         default='3_prime_UTR_variant')
-    gt_exp.add_argument('--export_missing_genotypes', help='Export missing genotypes (missing genotypes export to a different (_missing) file.', action='store_true')
 
     args = parser.parse_args()
 
