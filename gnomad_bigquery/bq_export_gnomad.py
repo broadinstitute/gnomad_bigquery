@@ -12,7 +12,7 @@ from gnomad.utils.slack import try_slack
 from gnomad.utils.vep import CSQ_ORDER
 
 from gnomad_bigquery.bq_utils import (GNOMAD_VERSIONS, export_ht_for_bq,
-                                      get_gnomad_v3_data_for_bq, logger)
+                                      get_gnomad_v3_data_for_bq, logger, consequence_filter)
 from gnomad_qc.v2.resources.annotations import frequencies as v2_freq
 from gnomad_qc.v2.resources.annotations import rf as v2_rf
 from gnomad_qc.v2.resources.annotations import vep as v2_vep
@@ -58,23 +58,7 @@ def export_genotypes(
 
     mt = mt.select_cols().select_rows().add_row_index()
 
-    if least_consequence is not None:
-        vep_consequences = hl.literal(set(CSQ_ORDER[0:CSQ_ORDER.index(least_consequence) + 1]))
-        vep = vep.filter(
-            vep.vep.transcript_consequences.any(
-                lambda x: (x.biotype == "protein_coding")
-                & hl.any(lambda csq: vep_consequences.contains(csq), x.consequence_terms)
-            )
-        )
-    else:
-        vep = vep.filter(
-            vep.vep.transcript_consequences.any(lambda x: x.biotype == "protein_coding")
-        )
-    vep = vep.persist()
-    logger.debug(
-        f"Found {vep.count()} variants with a VEP coding transcript and a consequence worst or equal to {least_consequence}."
-        )
-
+    vep = consequence_filter(vep, least_consequence)
     select_expr = hl.is_defined(vep[mt.row_key])
 
     if max_freq is not None:
@@ -120,7 +104,16 @@ def export_genotypes(
     ht.to_spark().write.parquet(f'{output_dir}/gnomad_v{version}_{data_type}_genotypes.parquet', mode='overwrite')
 
 
-def export_variants(data_type: str, version: int, export_all_sex_freq: bool, export_filters: bool, output_dir: str, add_vep: bool) -> None:
+def export_variants(
+    data_type: str,
+    version: int,
+    export_all_sex_freq: bool,
+    export_filters: bool,
+    output_dir: str,
+    add_vep: bool,
+    split_variant_table: bool,
+    least_consequence: str = None
+    ) -> None:
     """
     Exports all variants in gnomAD with their frequencies and optional vep transcript consequences
     :param data_type: exomes or genomes
@@ -129,6 +122,8 @@ def export_variants(data_type: str, version: int, export_all_sex_freq: bool, exp
     :param export_filters: Whether to add variant filters such as random forest annotations and vqsr 
     :param output_dir: Directory where to write parquet file
     :param add_vep: Whether to annotate with vep's transcript_consequences and most_severe_consequence
+    :param split_variant_table: When True, split the varaint table based on variants presence in the genotypes table
+    :param least_consequence: Least consequence admitted, default is `3_prime_UTR_variant`, needs to be the same as corresponding genotype table.
     :return:
     """
     def format_freq(ht: hl.Table):
@@ -179,14 +174,6 @@ def export_variants(data_type: str, version: int, export_all_sex_freq: bool, exp
     ht = ht.select().add_index()
     freq_meta = hl.literal(freq.freq_meta.collect()[0])
     ht = format_freq(ht)
-
-    if add_vep:
-        vep = vep.select(
-            transcript_consequences=vep.vep.transcript_consequences,
-            most_severe_consequence=vep.vep.most_severe_consequence
-        )
-        ht = ht.annotate(**vep[ht.key])
-
     ht = ht.annotate(nonpar=(ht.locus.in_x_nonpar() | ht.locus.in_y_nonpar()))
     ht = ht.annotate(lcr=hl.is_defined(lcr[ht.locus]))
 
@@ -199,7 +186,21 @@ def export_variants(data_type: str, version: int, export_all_sex_freq: bool, exp
     if version == 3 and export_filters:
         ht = ht.annotate(vqsr_filters=vqsr[ht.key].filters)
 
-    export_ht_for_bq(ht, f'{output_dir}/gnomad_v{version}_{data_type}_variants.parquet')
+    if add_vep:
+        vep_ann = vep.select(
+            transcript_consequences=vep.vep.transcript_consequences,
+            most_severe_consequence=vep.vep.most_severe_consequence
+        )
+        ht = ht.annotate(**vep_ann[ht.key])
+
+    if split_variant_table:
+        vep = consequence_filter(vep, least_consequence)
+        v_in_gt_ht = ht.filter(hl.is_defined(vep[ht.key]))
+        export_ht_for_bq(v_in_gt_ht, f'{output_dir}/gnomad_v{version}_{data_type}_variants_in_gt.parquet')
+        v_not_in_gt_ht = ht.anti_join(v_in_gt_ht)
+        export_ht_for_bq(v_not_in_gt_ht, f'{output_dir}/gnomad_v{version}_{data_type}_variants_not_in_gt.parquet')
+    else:
+        export_ht_for_bq(ht, f'{output_dir}/gnomad_v{version}_{data_type}_variants.parquet')
 
 
 def main(args):
@@ -233,7 +234,15 @@ def main(args):
                             )
 
         if args.export_variants:
-            export_variants(data_type, version, args.export_all_sex_freq, True, args.output_dir, True)
+            export_variants(data_type,
+                            version,
+                            args.export_all_sex_freq,
+                            True,
+                            args.output_dir,
+                            True,
+                            args.split_variant_table,
+                            args.least_consequence
+                            )
 
 
 if __name__ == '__main__':
@@ -255,8 +264,8 @@ if __name__ == '__main__':
 
     gt_exp = parser.add_argument_group('Export genotypes', description='Options related to exporting gnomAD genotypes')
     gt_exp.add_argument('--max_freq', help='If specified, maximum global adj AF for genotypes table to emit. (default: 0.02)', default=0.02, type=float)
-    gt_exp.add_argument('--least_consequence', help='When exporting genotypes, includes all variants for which the worst_consequence is at least as bad as the specified consequence. The order is taken from gnomad_hail.constants. (default: 3_prime_UTR_variant)',
-                        default='3_prime_UTR_variant')
+    gt_exp.add_argument('--least_consequence', help='When exporting genotypes, includes all variants for which the worst_consequence is at least as bad as the specified consequence. The order is taken from gnomad_hail.utils.vep. (default: 3_prime_UTR_variant)',
+                        choices=CSQ_ORDER, default='3_prime_UTR_variant')
 
     args = parser.parse_args()
 
