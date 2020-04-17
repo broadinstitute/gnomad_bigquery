@@ -4,9 +4,8 @@ import sys
 from google.cloud import bigquery
 
 from gnomad_bigquery.bq_table_descriptions import (get_data_view_desc,
-                                                   get_genotypes_table_desc,
                                                    get_meta_table_desc,
-                                                   get_variants_table_desc)
+                                                   get_variants_view_desc)
 from gnomad_bigquery.bq_utils import create_table, create_union_query, logger, GNOMAD_VERSIONS
 
 POPMAX_SQL = """
@@ -19,7 +18,7 @@ POPMAX_SQL = """
             """
 
 
-def get_data_view(client: bigquery.Client, data_type: str, dataset: bigquery.DatasetReference) -> str:
+def get_data_view(client: bigquery.Client, data_type: str, dataset: bigquery.DatasetReference, split_variant_table=False) -> str:
     """
     This creates a view over one of the 'exomes' or 'genomes' data regrouping the
     variants, genotypes and sample metadata into a single view.
@@ -33,7 +32,12 @@ def get_data_view(client: bigquery.Client, data_type: str, dataset: bigquery.Dat
 
     # Exclude data_type from meta, so we can use * in main  query
     meta_table = client.get_table(dataset.table(f'{data_type}_meta'))
-    variants_table = client.get_table(dataset.table(f'{data_type}_variants'))
+    if split_variant_table:
+        variants_table = client.get_table(dataset.table(f'{data_type}_variants_in_gt'))
+        variant_sql = 'variants_in_gt'
+    else:
+        variants_table = client.get_table(dataset.table(f'{data_type}_variants'))
+        variant_sql = 'variants'
     genotypes_table = client.get_table(dataset.table(f'{data_type}_genotypes'))
     meta_cols = [f.name for f in meta_table.schema if f.name != 'data_type']
     genotypes_cols = [f.name for f in genotypes_table.schema]
@@ -48,9 +52,36 @@ def get_data_view(client: bigquery.Client, data_type: str, dataset: bigquery.Dat
            {",".join([f'meta.{f}' for f in meta_cols if f not in genotypes_cols])},
             {POPMAX_SQL}
             
-           FROM `{dataset.project}.{dataset.dataset_id}.{data_type}_variants` as v
+           FROM `{dataset.project}.{dataset.dataset_id}.{data_type}_{variant_sql}` as v
     LEFT JOIN `{dataset.project}.{dataset.dataset_id}.{data_type}_genotypes` as gt ON v.idx = gt.v
     LEFT JOIN `{dataset.project}.{dataset.dataset_id}.{data_type}_meta` as meta ON gt.s = meta.s    
+    """
+
+
+def union_variant_view(client: bigquery.Client, data_type: str, dataset: bigquery.DatasetReference) -> str:
+    """
+    This creates a single view over 'exomes' or 'genomes' variants only if they were split 
+    by whether the variant was in the genotypes table.
+
+    :param CLient client: BQ client
+    :param str data_type: One of 'exomes' or 'genomes'
+    :param DatasetReference dataset: BQ Dataset
+    :return: SQL for the view
+    :rtype: str
+    """
+    variant_table = client.get_table(dataset.table(f'{data_type}_variants_in_gt'))
+    variants_cols = [f.name for f in variant_table.schema]
+
+    return f"""
+
+    SELECT {",".join([f'{f}' for f in variants_cols])},
+            {POPMAX_SQL}
+           FROM `{dataset.project}.{dataset.dataset_id}.{data_type}_variants_in_gt`
+    UNION ALL
+
+    SELECT {",".join([f'{f}' for f in variants_cols ])},
+            {POPMAX_SQL}
+            FROM `{dataset.project}.{dataset.dataset_id}.{data_type}_variants_not_in_gt`
     """
 
 
@@ -70,10 +101,18 @@ def main(args):
         logger.info(f"Creating {data_type} view")
         create_table(client,
                     dataset.table(data_type),
-                    sql=get_data_view(client, data_type, dataset),
+                    sql=get_data_view(client, data_type, dataset, args.split_variant_table),
                     view=True,
                     overwrite=args.overwrite,
-                    description=get_data_view_desc(version, data_type)
+                    description=get_data_view_desc(version, data_type, args.split_variant_table)
+                    )
+        if args.split_variant_table:
+            create_table(client,
+                    dataset.table(f'{data_type}_all_variants'),
+                    sql=union_variant_view(client, data_type, dataset),
+                    view=True,
+                    overwrite=args.overwrite,
+                    description=get_variants_view_desc(version, data_type)
                     )
 
     if 'exomes' in data_types and 'genomes' in data_types:  
@@ -119,6 +158,7 @@ if __name__ == '__main__':
     parser.add_argument('--dataset', help='Dataset to create the table in. (default: gnomad)', default='gnomad')
     parser.add_argument('--version', help="Version of gnomAD", choices=GNOMAD_VERSIONS, type=int, required=True)
     parser.add_argument('--overwrite', help='If set, will overwrite all existing tables.', action='store_true')
+    parser.add_argument('--split_variant_table', help='Whether the variant table was split by a least consequence term', action='store_true')
     args = parser.parse_args()
 
     if not args.exomes and not args.genomes:

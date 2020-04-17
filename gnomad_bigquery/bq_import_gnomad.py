@@ -17,7 +17,7 @@ def main(args):
         imp_args = parser.parse_args(['--dataset', args.dataset,
                         '--parquet_files', parquet_files,
                         '--table', f'{data_type}_{data}',
-                        '--write_disposition', 
+                        '--write_disposition',
                         'WRITE_TRUNCATE' if args.overwrite else 'WRITE_EMPTY',
                         '--description', description])
         bq_import.main(imp_args)
@@ -37,7 +37,11 @@ def main(args):
             import_data(input_dir, version, data_type, 'meta', get_meta_table_desc(version, data_type))
 
         if args.import_variants:
-            import_data(input_dir, version, data_type, 'variants', get_variants_table_desc(version, data_type))
+            if args.split_variant_table:
+                import_data(input_dir, version, data_type, 'variants_in_gt', get_variants_table_desc(version, data_type, split=True, in_gt=True))
+                import_data(input_dir, version, data_type, 'variants_not_in_gt', get_variants_table_desc(version, data_type, split=True, in_gt=False))
+            else:
+                import_data(input_dir, version, data_type, 'variants', get_variants_table_desc(version, data_type))
 
         if args.import_genotypes:
             import_data(input_dir, version, data_type, 'genotypes', get_genotypes_table_desc(version, data_type))
@@ -52,6 +56,7 @@ if __name__ == '__main__':
     parser.add_argument('--dataset', help='Dataset to create the table in. (default: gnomad)', default='gnomad')
     parser.add_argument('--import_meta', help='Imports samples metadata.', action='store_true')
     parser.add_argument('--import_variants', help='Imports variants.', action='store_true')
+    parser.add_argument('--split_variant_table', help='Whether the variant table was split by genotype table overlap on export', action="store_true")
     parser.add_argument('--import_genotypes', help='Imports genotypes.', action='store_true')
     parser.add_argument('--input_dir', help='Input root directory (assumes data was produced with `bq_export.py`). default: gs://gnomad-tmp/bq', default='gs://gnomad-tmp/bq')
     parser.add_argument('--overwrite', help='If set, overwrites existing table.', action='store_true')

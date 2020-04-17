@@ -5,6 +5,7 @@ from typing import Dict, List
 import hail as hl
 from gnomad.sample_qc.sex import adjusted_sex_ploidy_expr
 from gnomad.utils.annotations import get_adj_expr
+from gnomad.utils.vep import CSQ_ORDER
 from google.cloud import bigquery
 
 logging.basicConfig(format="%(levelname)s (%(name)s %(lineno)s): %(message)s")
@@ -164,3 +165,31 @@ def get_gnomad_v3_data_for_bq(key_by_locus_and_alleles=True, remove_hard_filtere
             adj=get_adj_expr(mt.GT, mt.GQ, mt.DP, mt.AD)
         )
     return mt
+
+
+def consequence_filter(vep_ht: hl.Table, least_consequence: str) -> hl.Table:
+    """Filter VEP Table to variants containing the least consequence term up
+    to the most severe in in CSQ_ORDER
+    :param vep_ht: VEP hail Table to be filtered
+    :param least_consequence: Least transcript consequence to be kept in vep variant table
+    :returns: hl.Table
+    """
+    vep = vep_ht
+    if least_consequence is not None:
+        vep_consequences = hl.literal(set(CSQ_ORDER[0:CSQ_ORDER.index(least_consequence) + 1]))
+        vep = vep.filter(
+            vep.vep.transcript_consequences.any(
+                lambda x: (x.biotype == "protein_coding")
+                & hl.any(lambda csq: vep_consequences.contains(csq), x.consequence_terms)
+            )
+        )
+    else:
+        vep = vep.filter(
+            vep.vep.transcript_consequences.any(lambda x: x.biotype == "protein_coding")
+        )
+    logger.debug(
+        f"Found {vep.count()} variants with a VEP coding transcript and a consequence worst or equal to {least_consequence}."
+        )
+    vep = vep.persist()
+    return vep
+    
