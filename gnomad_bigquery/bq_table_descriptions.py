@@ -7,7 +7,7 @@ def get_variants_table_desc(version: int, data_type: str, split=False, in_gt=Fal
     if split:
         if in_gt:
             return f"""This table contains gnomad v{version} {dtype} variants that are filtered similarly to the
-             genotypes table, optionally filtered by a least consequence term and max AF. 
+             genotypes table i.e., optionally filtered by a least consequence term and max AF. 
             Notes:
             * All variants were split, so multi-allelic sites are represented as multiple rows (one per non-ref allele)
             * Only VEP transcript annotations are available (non-coding annotations aren't)

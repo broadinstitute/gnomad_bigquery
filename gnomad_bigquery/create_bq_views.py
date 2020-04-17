@@ -61,7 +61,7 @@ def get_data_view(client: bigquery.Client, data_type: str, dataset: bigquery.Dat
 def union_variant_view(client: bigquery.Client, data_type: str, dataset: bigquery.DatasetReference) -> str:
     """
     This creates a single view over 'exomes' or 'genomes' variants only if they were split 
-    by whteher the variant was in the genotypes table.
+    by whether the variant was in the genotypes table.
 
     :param CLient client: BQ client
     :param str data_type: One of 'exomes' or 'genomes'
